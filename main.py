@@ -9,7 +9,7 @@ from typing import Optional
 import requests
 import markdown2
 from bs4 import BeautifulSoup
-from openai import OpenAI
+import openai
 from PIL import Image
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
@@ -61,14 +61,8 @@ if not AIPROXY_TOKEN:
 if not AIPROXY_TOKEN:
     raise KeyError("AIPROXY_TOKEN environment variables is missing")
 
-APP_ID = "hari-tds2025-project1"
+APP_ID = "Smriti-tds-project"
 
-# POST `/run?task=<task description>`` Executes a plain‑English task.
-# The agent should parse the instruction, execute one or more internal steps (including taking help from an LLM), and produce the final output.
-# - If successful, return a HTTP 200 OK response
-# - If unsuccessful because of an error in the task, return a HTTP 400 Bad Request response
-# - If unsuccessful because of an error in the agent, return a HTTP 500 Internal Server Error response
-# - The body may optionally contain any useful information in each of these cases
 @app.post("/run")
 def run_task(task: str):
     if not task:
@@ -114,10 +108,6 @@ def parse_function_args(function_args: Optional[Any]) -> Dict[str, Any]:
     return function_args
 
 
-# GET `/read?path=<file path>` Returns the content of the specified file.
-# This is critical for verification of the exact output.
-# - If successful, return a HTTP 200 OK response with the file content as plain text
-# - If the file does not exist, return a HTTP 404 Not Found response and an empty body
 @app.get("/read")
 def read_file(path: str) -> Response:
     if not path:
@@ -138,7 +128,6 @@ def read_file(path: str) -> Response:
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
 
-# Task implementations
 task_tools = [
     {
         "type": "function",
@@ -365,8 +354,6 @@ def get_task_tool(task: str, tools: list[Dict[str, Any]]) -> Dict[str, Any]:
             "tool_choice": "auto",
         },
     )
-
-    # response.raise_for_status()
 
     json_response = response.json()
 
