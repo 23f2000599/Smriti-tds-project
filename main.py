@@ -22,7 +22,7 @@ import re
 import base64
 from PIL import Image
 from io import BytesIO
-import easyocr
+#import easyocr
 import numpy as np
 
 app = FastAPI()
@@ -466,31 +466,59 @@ def initialize_data():
 
 
 # A2. Format a file using prettier
+import os
+import subprocess
+from fastapi import HTTPException
+
 def format_file(source: str = None) -> dict:
     if not source:
         raise HTTPException(status_code=400, detail="Source file is required")
 
-    file_path: str = source
+    file_path = os.path.abspath(source)
 
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
 
     try:
-        result = subprocess.run(
-            ["prettier", "--write", file_path],
-            shell=True,
+        # Step 1: Run Prettier with improved options
+        prettier_cmd = [
+            "npx", "prettier", "--write",
+            "--parser", "markdown",
+            "--prose-wrap", "preserve",  # Prevents unwanted line breaks
+            "--tab-width", "2",
+            "--use-tabs", "false",
+            "--no-semi",  # Helps with bullet list issues
+            file_path
+        ]
+
+        prettier_result = subprocess.run(
+            prettier_cmd,
             check=True,
-            capture_output=True,
-            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
         )
 
-        if result.stderr:
-            raise HTTPException(status_code=500, detail=result.stderr)
+        if prettier_result.stderr:
+            raise HTTPException(status_code=500, detail=prettier_result.stderr.strip())
 
-        return {"message": "File formatted", "source": file_path, "status": "success"}
+        # Step 2: Verify Formatting & Fallback to remark-cli if needed
+        with open(file_path, "r", encoding="utf-8") as f:
+            formatted_content = f.read()
+
+        # Check if formatting is incorrect (example heuristic)
+        if "  +" in formatted_content or formatted_content.count("\n") < 3:
+            # Fallback to remark-cli if Prettier messed up the structure
+            remark_cmd = ["npx", "remark", "--output", file_path]
+            subprocess.run(remark_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        return {"message": "File formatted successfully", "file": file_path, "status": "success"}
 
     except subprocess.CalledProcessError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Formatting Error: {e.stderr}")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
 # A3. Count the number of week-days in the list of dates
@@ -554,38 +582,33 @@ def normalize_weekday(weekday):
 
 
 # A4. Sort the array of contacts by last name and first name
-def sort_contacts(
-    order: str = None, source: str = None, destination: str = None
-) -> dict:
-    order = order or "last_name"
+import json
 
-    if not source:
-        raise HTTPException(status_code=400, detail="Source file is required")
+def sort_contacts(order: str, source: Optional[str], destination: Optional[str]):
+    logger.info(f"Sorting contacts from {source}, order: {order}, writing to {destination}")
 
-    file_path: str = source
-    output_path: str = destination or file_rename(file_path, "-sorted.json")
+    if not source or not os.path.exists(source):
+        raise HTTPException(status_code=400, detail="Source file not found")
 
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
+    if not destination:
+        raise HTTPException(status_code=400, detail="Destination file not provided")
 
-    with open(file_path, "r") as f:
-        contacts = json.load(f)
+    try:
+        with open(source, "r") as f:
+            contacts = json.load(f)
 
-    key1: str = "last_name" if order != "first_name" else "first_name"
-    key2: str = "last_name" if key1 == "first_name" else "first_name"
+        key = "last_name" if order == "last_name" else "first_name"
+        sorted_contacts = sorted(contacts, key=lambda x: x.get(key, "").lower())
 
-    contacts.sort(key=lambda x: (x.get(key1, ""), x.get(key2, "")))
+        with open(destination, "w") as f:
+            json.dump(sorted_contacts, f, indent=4)
 
-    with open(output_path, "w") as f:
-        json.dump(contacts, f, indent=4)
+        logger.info(f"Sorted contacts written successfully to {destination}")
+        return {"message": "Contacts sorted successfully"}
 
-    return {
-        "message": "Contacts sorted",
-        "source": file_path,
-        "destination": output_path,
-        "status": "success",
-    }
-
+    except Exception as e:
+        logger.error(f"Error sorting contacts: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
 # A5. Write the first line of the 10 most recent .log file in /data/logs/ to /data/logs-recent.txt, most recent first
 def write_recent_logs(count: int, source: str = None, destination: str = None):
@@ -725,7 +748,7 @@ def extract_credit_card_number(source: str = None, destination: str = None):
 
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Image file not found")
-
+    import easyocr
     # Taking more time
     reader = easyocr.Reader(["en"])
     results = reader.readtext(file_path, detail=0)
